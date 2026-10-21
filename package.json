@@ -1,0 +1,58 @@
+{
+  "name": "dsh-subagent-models",
+  "version": "0.1.0",
+  "description": "Set the provider, model and reasoning effort DSH subagents run with: one profile-wide default in Settings, plus a per-conversation override from a chip beside the composer.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Gary Gai",
+  "icon": "icon.svg",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Garybot126/dsh-subagent-models.git"
+  },
+  "homepage": "https://github.com/Garybot126/dsh-subagent-models#readme",
+  "bugs": {
+    "url": "https://github.com/Garybot126/dsh-subagent-models/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "harness",
+    "deepseek-harness",
+    "subagent",
+    "model",
+    "reasoning-effort",
+    "router"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "LICENSE",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

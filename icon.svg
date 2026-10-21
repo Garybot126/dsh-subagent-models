@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Subagent routing">
+  <rect width="64" height="64" rx="16" fill="#1f2430"/>
+  <path d="M20 22h10a8 8 0 0 1 8 8v4a8 8 0 0 0 8 8h0" fill="none" stroke="#4176e6" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="18" cy="22" r="4.5" fill="#4176e6"/>
+  <circle cx="46" cy="42" r="4.5" fill="#e8eefc"/>
+  <rect x="40" y="14" width="12" height="12" rx="3" fill="none" stroke="#8a94a6" stroke-width="2.4"/>
+  <path d="M43 20h6M46 17v6" stroke="#8a94a6" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

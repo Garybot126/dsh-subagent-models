@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Subagent Routing",
+    "description": "Choose the model and reasoning effort delegated subagents run with — one profile-wide default, or an override for a single conversation."
+  }
+}
