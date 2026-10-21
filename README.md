@@ -12,6 +12,12 @@ one profile-wide default, plus a per-conversation override from a chip beside th
 
 ---
 
+## Screenshots / 截图
+
+| Settings → 子代理 | Composer → 「⤳ 子代理」 |
+|---|---|
+| ![Settings page](docs/screenshots/settings.png) | ![Composer card](docs/screenshots/conversation.png) |
+
 ## Install / 安装
 
 ```bash
