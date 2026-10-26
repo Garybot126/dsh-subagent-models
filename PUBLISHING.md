@@ -33,6 +33,11 @@ The exact content is in [`market/Garybot126__dsh-subagent-models.yml`](market/Ga
 
 <https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/new/main/data/plugins/Garybot126__dsh-subagent-models.yml>
 
+An entry may declare **only** `url`, `name`, `category`, `description`, `icon`, `tarball` — their CI
+rejects unknown fields ("unknown field \"screenshots\""), and the npm package is resolved
+automatically from the repository rather than declared. Screenshots for the market card come from
+the images embedded in this README (`docs/screenshots/…`).
+
 Prerequisites, checked by their CI:
 
 - [ ] `package.json` declares `dsh.bundle` — done here (`"bundle": { "patch": "./cordis.patch.yml" }`).
