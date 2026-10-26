@@ -76,9 +76,10 @@ function normalizeState(input) {
   return state
 }
 
-/** The one setting: the profile-wide default route, or none. */
-function resolveRoute(state) {
-  return state.global.default || null
+/** This conversation's override, else the profile-wide default. */
+function resolveRoute(state, sessionId) {
+  const session = sessionId ? state.sessions[sessionId] : undefined
+  return session?.default || state.global.default || null
 }
 
 /** A route wins only when its model is still advertised by a mounted provider. */
@@ -109,17 +110,6 @@ export function apply(ctx) {
     try {
       const raw = JSON.parse(await readFile(dataFile(), 'utf8'))
       cache = normalizeState(raw)
-      if (raw?.sessions && Object.keys(raw.sessions).length > 0) {
-        // One-time migration: there is a single setting now (the profile default).
-        // Keep the old per-conversation overrides on disk as a backup, then stop
-        // honoring them so a forgotten override cannot shadow the default.
-        const file = dataFile()
-        const backup = file.replace(/\.json$/, `.sessions.bak-${Date.now()}.json`)
-        await writeFile(backup, `${JSON.stringify(raw, null, 2)}\n`, 'utf8')
-        cache.sessions = {}
-        await writeFile(file, `${JSON.stringify(cache, null, 2)}\n`, 'utf8')
-        ctx.logger?.info?.(`[subagent-models] migrated per-conversation overrides to ${backup}`)
-      }
     } catch {
       cache = normalizeState(null)
     }
@@ -147,9 +137,19 @@ export function apply(ctx) {
   async function mutate(mutation) {
     const current = await loadState()
     const next = normalizeState(JSON.parse(JSON.stringify(current)))
-    next.sessions = {}
-    next.global.default = normalizeRoute(mutation?.route)
-    await saveState(next)
+    const scope = mutation?.scope === 'session' ? 'session' : 'global'
+    const route = normalizeRoute(mutation?.route)
+
+    if (scope === 'session') {
+      const sessionId = typeof mutation?.sessionId === 'string' ? mutation.sessionId : ''
+      if (!sessionId) throw new Error('sessionId is required for a conversation override')
+      if (route) next.sessions[sessionId] = { default: route, presets: {} }
+      else delete next.sessions[sessionId]
+    } else {
+      next.global.default = route
+    }
+
+    await saveState(normalizeState(next))
     return cache
   }
 
@@ -234,9 +234,14 @@ export function apply(ctx) {
   async function routeFor(agent) {
     if (!agent?.id) return null
     // Only a delegated child is rewritten; a top-level Session keeps the user's choice.
-    if (ownersOf(agent).length === 0) return null
+    const owners = ownersOf(agent)
+    if (owners.length === 0) return null
     const state = await loadState()
-    return resolveRoute(state)
+    for (const owner of owners) {
+      const session = state.sessions[owner.id]
+      if (session?.default) return session.default
+    }
+    return state.global.default || null
   }
 
   ctx.on('agent/request', async (payload, next) => {
@@ -251,8 +256,14 @@ export function apply(ctx) {
     }
   })
 
-  function view(state) {
-    return { ok: true, version: STATE_VERSION, global: state.global }
+  function view(state, sessionId) {
+    return {
+      ok: true,
+      version: STATE_VERSION,
+      global: state.global,
+      session: sessionId ? state.sessions[sessionId] ?? null : null,
+      sessionId: sessionId ?? null,
+    }
   }
 
   async function handleHttp(req, res) {
@@ -264,12 +275,16 @@ export function apply(ctx) {
     try {
       if (req.method === 'GET' && action === 'state') {
         const state = await loadState()
-        return sendJson(res, 200, { ...view(state), models: await buildCatalog() })
+        const sessionId = url.searchParams.get('sessionId') || null
+        return sendJson(res, 200, { ...view(state, sessionId), models: await buildCatalog() })
       }
       if (req.method === 'POST' && action === 'route') {
         const body = await readJson(req)
         const next = await mutate(body)
-        return sendJson(res, 200, { ...view(next), models: await buildCatalog() })
+        return sendJson(res, 200, {
+          ...view(next, typeof body?.sessionId === 'string' ? body.sessionId : null),
+          models: await buildCatalog(),
+        })
       }
       if (req.method === 'POST' && action === 'hello') {
         // The Web UI announces itself once per module load: the settings page and

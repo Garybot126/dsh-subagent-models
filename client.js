@@ -1,9 +1,10 @@
 /**
  * Subagent models — Web UI.
  *
- * ONE setting, ONE place to change it: `settings.section` renders the only
- * editor (provider/model + reasoning effort). The composer badge is read-only
- * status so the conversation always says what the subagents will actually use.
+ * ONE entry: the chip beside the composer. It opens a frame-wide card with two
+ * scopes over the same two controls — 「本对话」(this conversation's override)
+ * and 「全局默认」(the profile-wide default) — and never anywhere else: no
+ * settings page, so there is no second place to look for the value.
  *
  * The route is applied by the Host `agent/request` override; this module only
  * reads and writes /plugin/subagent-models/*.
@@ -13,7 +14,7 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react')
     const h = React.createElement
-    const { useCallback, useEffect, useMemo, useState } = React
+    const { useCallback, useEffect, useMemo, useRef, useState } = React
 
     const ENDPOINT = '/plugin/subagent-models'
     const INHERIT = ''
@@ -23,9 +24,33 @@ window.__ModuleLoader__.load({
       secondary: 'var(--dsw-alias-label-secondary)',
       border: 'var(--dsw-alias-border-l1)',
       surface: 'var(--dsw-alias-bg-layer-1)',
+      overlay: 'var(--dsw-alias-bg-overlay)',
       brand: 'var(--dsw-alias-brand-primary)',
       error: 'var(--dsw-alias-state-error-primary)',
     }
+
+    /* ── shared card state ──────────────────────────────────────────────── */
+
+    const overlay = {
+      state: { open: false, sessionId: null, anchor: null },
+      listeners: new Set(),
+      set(next) {
+        overlay.state = next
+        for (const listener of overlay.listeners) listener(next)
+      },
+      subscribe(listener) {
+        overlay.listeners.add(listener)
+        return () => overlay.listeners.delete(listener)
+      },
+    }
+
+    function useOverlayState() {
+      const [state, setState] = useState(overlay.state)
+      useEffect(() => overlay.subscribe(setState), [])
+      return state
+    }
+
+    /* ── host transport ───────────────────────────────────────────────────── */
 
     function routeKey(route) {
       return route ? `${route.provider}\u0000${route.model}` : INHERIT
@@ -36,41 +61,42 @@ window.__ModuleLoader__.load({
       return route.effort ? `${route.model} · ${route.effort}` : route.model
     }
 
-    async function readState() {
-      const response = await fetch(`${ENDPOINT}/state`, { headers: { accept: 'application/json' } })
+    async function readState(sessionId) {
+      const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
+      const response = await fetch(`${ENDPOINT}/state${query}`, { headers: { accept: 'application/json' } })
       const body = await response.json().catch(() => null)
       if (!response.ok || !body?.ok) throw new Error(body?.error ?? `请求失败（${response.status}）`)
       return body
     }
 
-    async function writeRoute(route) {
+    async function writeRoute(payload) {
       const response = await fetch(`${ENDPOINT}/route`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ scope: 'global', route }),
+        body: JSON.stringify(payload),
       })
       const body = await response.json().catch(() => null)
       if (!response.ok || !body?.ok) throw new Error(body?.error ?? `保存失败（${response.status}）`)
       return body
     }
 
-    function useRoute() {
+    function useRoute(sessionId) {
       const [data, setData] = useState(null)
       const [error, setError] = useState(null)
       const [pending, setPending] = useState(false)
 
       const reload = useCallback(async () => {
         try {
-          setData(await readState())
+          setData(await readState(sessionId))
           setError(null)
         } catch (cause) {
           setError(cause.message ?? String(cause))
         }
-      }, [])
+      }, [sessionId])
 
       useEffect(() => {
         let alive = true
-        readState()
+        readState(sessionId)
           .then((next) => {
             if (alive) {
               setData(next)
@@ -83,22 +109,28 @@ window.__ModuleLoader__.load({
         return () => {
           alive = false
         }
-      }, [])
+      }, [sessionId])
 
-      const save = useCallback(async (route) => {
-        setPending(true)
-        try {
-          setData(await writeRoute(route))
-          setError(null)
-        } catch (cause) {
-          setError(cause.message ?? String(cause))
-        } finally {
-          setPending(false)
-        }
-      }, [])
+      const save = useCallback(
+        async (payload) => {
+          setPending(true)
+          try {
+            await writeRoute(payload)
+            setData(await readState(sessionId))
+            setError(null)
+          } catch (cause) {
+            setError(cause.message ?? String(cause))
+          } finally {
+            setPending(false)
+          }
+        },
+        [sessionId],
+      )
 
       return { data, error, pending, save, reload }
     }
+
+    /* ── small pieces ─────────────────────────────────────────────────────── */
 
     function findModel(models, route) {
       if (!route) return null
@@ -135,10 +167,10 @@ window.__ModuleLoader__.load({
       fontSize: 12,
       padding: '0 24px 0 10px',
       fontFamily: 'inherit',
-      maxWidth: 220,
+      maxWidth: 210,
     }
 
-    function RouteControls({ models, route, disabled, onChange }) {
+    function RouteControls({ models, route, inheritLabel, disabled, onChange }) {
       const model = findModel(models, route)
       const efforts = model?.efforts ?? []
       return h(
@@ -158,7 +190,7 @@ window.__ModuleLoader__.load({
               onChange({ provider, model: id, effort: null })
             },
           },
-          h('option', { value: INHERIT }, '跟随主会话'),
+          h('option', { value: INHERIT }, inheritLabel),
           h(GroupedModelOptions, { models }),
         ),
         h(
@@ -174,6 +206,24 @@ window.__ModuleLoader__.load({
           h('option', { value: INHERIT }, efforts.length === 0 ? '—' : '模型默认'),
           efforts.map((effort) => h('option', { key: effort.id, value: effort.id }, effort.name)),
         ),
+      )
+    }
+
+    function ScopeBadge({ overridden }) {
+      return h(
+        'span',
+        {
+          style: {
+            fontSize: 11,
+            lineHeight: '16px',
+            borderRadius: 6,
+            padding: '1px 6px',
+            border: `0.5px solid ${overridden ? TOKENS.brand : TOKENS.border}`,
+            color: overridden ? TOKENS.brand : TOKENS.secondary,
+            whiteSpace: 'nowrap',
+          },
+        },
+        overridden ? '本对话已覆盖' : '跟随全局',
       )
     }
 
@@ -218,84 +268,229 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** The only editor: the profile-wide route for every delegated subagent. */
-    function SettingsSection() {
-      const { data, error, pending, save, reload } = useRoute()
+    function ScopeTab({ active, label, onClick }) {
+      return h(
+        'button',
+        {
+          type: 'button',
+          onClick,
+          'aria-pressed': active,
+          style: {
+            height: 26,
+            borderRadius: 7,
+            border: `0.5px solid ${active ? TOKENS.brand : TOKENS.border}`,
+            background: active ? TOKENS.surface : 'transparent',
+            color: active ? TOKENS.brand : TOKENS.secondary,
+            fontSize: 12,
+            padding: '0 10px',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          },
+        },
+        label,
+      )
+    }
+
+    /* ── the card: one entry, two scopes ──────────────────────────────────── */
+
+    function RouteCard({ sessionId, cardRef, overlayAnchor }) {
+      const { data, error, pending, save, reload } = useRoute(sessionId)
+      const [scope, setScope] = useState('session')
       const models = data?.models ?? []
-      const route = data?.global?.default ?? null
+      const globalRoute = data?.global?.default ?? null
+      const sessionRoute = data?.session?.default ?? null
+      const effective = sessionRoute ?? globalRoute ?? null
+      const source = sessionRoute ? '本对话' : globalRoute ? '全局默认' : '主会话'
+      const close = () => overlay.set({ open: false, sessionId: null, anchor: null })
+
+      const width = 380
+      const margin = 12
+      const viewWidth = typeof window === 'undefined' ? 1280 : window.innerWidth
+      const viewHeight = typeof window === 'undefined' ? 800 : window.innerHeight
+      const left = overlayAnchor
+        ? Math.min(Math.max(margin, Math.round(overlayAnchor.left)), Math.max(margin, viewWidth - width - margin))
+        : Math.round((viewWidth - width) / 2)
+      const bottom = overlayAnchor ? Math.max(margin, Math.round(viewHeight - overlayAnchor.top + 10)) : 104
+
+      const route = scope === 'session' ? sessionRoute : globalRoute
+      const inheritLabel =
+        scope === 'session' ? (globalRoute ? `跟随全局（${routeText(globalRoute)}）` : '跟随主会话') : '跟随主会话'
+      const onChange = (next) => save(
+        scope === 'session' ? { scope: 'session', sessionId, route: next } : { scope: 'global', route: next },
+      )
+
       return h(
         'div',
-        { style: { display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 24px 24px', color: TOKENS.text } },
-        h(
-          'div',
-          null,
-          h('div', { style: { fontSize: 18, lineHeight: '26px', fontWeight: 600 } }, '子代理'),
-          h(
-            'div',
-            { style: { fontSize: 13, lineHeight: '20px', color: TOKENS.secondary, marginTop: 4 } },
-            '所有 subagent 委派的子代理都用这里的 provider、模型与思考强度。改完对下一次委派立即生效；正在运行中的子代理，从它的下一次模型请求起生效。',
-          ),
-        ),
-        h(
-          'div',
-          {
-            style: {
-              border: `0.5px solid ${TOKENS.border}`,
-              borderRadius: 14,
-              padding: '12px 14px',
-              display: 'flex',
-              gap: 12,
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              background: TOKENS.surface,
-            },
+        {
+          ref: cardRef,
+          role: 'dialog',
+          'aria-label': '子代理模型与思考强度',
+          style: {
+            pointerEvents: 'auto',
+            position: 'absolute',
+            left,
+            bottom,
+            width,
+            maxWidth: 'calc(100vw - 32px)',
+            background: TOKENS.overlay,
+            color: TOKENS.text,
+            border: `0.5px solid ${TOKENS.border}`,
+            borderRadius: 16,
+            boxShadow: '0 18px 48px rgba(0, 0, 0, 0.22)',
+            padding: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            textAlign: 'left',
           },
-          h(
-            'div',
-            { style: { minWidth: 200, flex: 1 } },
-            h('div', { style: { fontSize: 13, lineHeight: '20px', fontWeight: 600 } }, '默认路由'),
-            h(
-              'div',
-              { style: { fontSize: 12, lineHeight: '18px', color: TOKENS.secondary } },
-              route
-                ? `子代理将使用 ${route.provider} / ${route.model}${route.effort ? ` · ${route.effort}` : ''}`
-                : '未指定：子代理跟随发起委派的主会话路由',
-            ),
-          ),
-          h(RouteControls, { models, route, disabled: pending, onChange: (next) => save(next) }),
+        },
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+          h('div', { style: { fontSize: 14, fontWeight: 600 } }, '子代理'),
+          h(ScopeBadge, { overridden: Boolean(sessionRoute) }),
         ),
         h(
           'div',
-          { style: { fontSize: 12, lineHeight: '18px', color: TOKENS.secondary } },
-          '这是唯一设置入口：输入框旁只显示当前生效值，不提供第二个设置位置。fork 子代理也按同一路由运行——它共享父会话前缀，换模型会使这段前缀的缓存复用失效。',
+          { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+          h(ScopeTab, { active: scope === 'session', label: '本对话', onClick: () => setScope('session') }),
+          h(ScopeTab, { active: scope === 'global', label: '全局默认', onClick: () => setScope('global') }),
+          h(
+            'div',
+            { style: { fontSize: 11, lineHeight: '16px', color: TOKENS.secondary, marginLeft: 4 } },
+            scope === 'session' ? '只影响当前对话' : '影响所有未覆盖的对话',
+          ),
+        ),
+        h(RouteControls, {
+          models,
+          route,
+          inheritLabel,
+          disabled: pending,
+          onChange,
+        }),
+        h(
+          'div',
+          { style: { fontSize: 11, lineHeight: '16px', color: TOKENS.secondary } },
+          effective
+            ? `下一次委派将使用 ${routeText(effective)}（来源：${source}）`
+            : '未配置：下一次委派跟随主会话路由',
+        ),
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+          h(
+            'div',
+            { style: { display: 'flex', gap: 8 } },
+            scope === 'session' && sessionRoute
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: () => save({ scope: 'session', sessionId, route: null }),
+                    style: buttonStyle(),
+                  },
+                  '清除本对话覆盖',
+                )
+              : null,
+          ),
+          h('button', { type: 'button', onClick: close, style: buttonStyle() }, '完成'),
         ),
         h(ErrorLine, { message: error, onRetry: reload }),
       )
     }
 
-    /** Read-only: what this conversation's subagents will run with. */
-    function StatusBadge() {
-      const { data } = useRoute()
-      const route = data?.global?.default ?? null
-      const label = route ? `子代理 ${routeText(route)}` : '子代理 跟随主会话'
+    function buttonStyle() {
+      return {
+        height: 26,
+        borderRadius: 7,
+        border: `0.5px solid ${TOKENS.border}`,
+        background: 'transparent',
+        color: TOKENS.text,
+        fontSize: 12,
+        padding: '0 10px',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+      }
+    }
+
+    function RouteOverlay() {
+      const { open, sessionId, anchor } = useOverlayState()
+      const cardRef = useRef(null)
+
+      useEffect(() => {
+        if (!open) return undefined
+        const onDown = (event) => {
+          if (cardRef.current && cardRef.current.contains(event.target)) return
+          overlay.set({ open: false, sessionId: null, anchor: null })
+        }
+        const onKey = (event) => {
+          if (event.key === 'Escape') overlay.set({ open: false, sessionId: null, anchor: null })
+        }
+        document.addEventListener('mousedown', onDown)
+        document.addEventListener('keydown', onKey)
+        return () => {
+          document.removeEventListener('mousedown', onDown)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [open])
+
+      if (!open || !sessionId) return null
       return h(
-        'span',
+        'div',
+        { style: { position: 'fixed', inset: 0, zIndex: 900, pointerEvents: 'none' } },
+        h(RouteCard, { key: sessionId, sessionId, cardRef, overlayAnchor: anchor }),
+      )
+    }
+
+    /* ── the chip: the only entry ─────────────────────────────────────────── */
+
+    function ComposerChip(props) {
+      const sessionId = props.sessionId
+      const { data } = useRoute(sessionId)
+      const overlayState = useOverlayState()
+      const chipRef = useRef(null)
+
+      const globalRoute = data?.global?.default ?? null
+      const sessionRoute = data?.session?.default ?? null
+      const effective = sessionRoute ?? globalRoute ?? null
+      const isOpen = overlayState.open && overlayState.sessionId === sessionId
+      const label = effective ? `子代理 ${routeText(effective)}` : '子代理 跟随主会话'
+
+      return h(
+        'button',
         {
-          role: 'status',
-          title: route
-            ? `子代理将使用 ${route.provider}/${route.model}${route.effort ? `（${route.effort}）` : ''}；在 设置 › 子代理 中修改`
-            : '未配置子代理路由，子代理跟随主会话；在 设置 › 子代理 中配置',
+          ref: chipRef,
+          type: 'button',
+          onClick: () => {
+            if (isOpen) {
+              overlay.set({ open: false, sessionId: null, anchor: null })
+              return
+            }
+            const rect = chipRef.current?.getBoundingClientRect()
+            overlay.set({
+              open: true,
+              sessionId,
+              anchor: rect ? { left: rect.left, top: rect.top } : null,
+            })
+          },
+          title: effective
+            ? `子代理将使用 ${effective.provider}/${effective.model}${effective.effort ? `（${effective.effort}）` : ''}${sessionRoute ? '，来源：本对话' : '，来源：全局默认'}`
+            : '未配置子代理模型，跟随主会话',
+          'aria-haspopup': 'dialog',
+          'aria-expanded': isOpen,
           style: {
             height: 28,
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
             borderRadius: 8,
-            color: route ? TOKENS.brand : TOKENS.secondary,
+            border: `0.5px solid ${sessionRoute ? TOKENS.brand : TOKENS.border}`,
+            background: isOpen ? TOKENS.surface : 'transparent',
+            color: effective ? TOKENS.brand : TOKENS.secondary,
             fontSize: 12,
             padding: '0 8px',
-            cursor: 'default',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
             maxWidth: 220,
             overflow: 'hidden',
             whiteSpace: 'nowrap',
@@ -309,21 +504,18 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots'],
       apply(ctx) {
-        ctx.slots.inject('settings.section', () =>
-          ctx.slots.register(
-            { name: 'settings.section', id: 'subagent-routing', order: 12, label: () => '子代理' },
-            SettingsSection,
-          ),
-        )
         ctx.slots.inject('conversation.input.right', () =>
-          ctx.slots.register({ name: 'conversation.input.right', id: 'subagent-routing', order: 20 }, StatusBadge),
+          ctx.slots.register({ name: 'conversation.input.right', id: 'subagent-routing', order: 20 }, ComposerChip),
+        )
+        ctx.slots.inject('shell.overlay', () =>
+          ctx.slots.register({ name: 'shell.overlay', id: 'subagent-routing', order: 50 }, RouteOverlay),
         )
         // One-shot health note: proves this module reached the Host face from the
         // page. No user data, no token, no URL beyond the origin.
         void fetch(`${ENDPOINT}/hello`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ origin: location.origin, scope: 'client-loaded', rev: 4 }),
+          body: JSON.stringify({ origin: location.origin, scope: 'client-loaded', rev: 5 }),
         }).catch(() => {})
       },
     }
