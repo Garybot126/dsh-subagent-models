@@ -521,7 +521,7 @@ window.__ModuleLoader__.load({
         void fetch(`${ENDPOINT}/hello`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ origin: location.origin, scope: 'client-loaded', rev: 5 }),
+          body: JSON.stringify({ origin: location.origin, scope: 'client-loaded', rev: 6 }),
         }).catch(() => {})
       },
     }
