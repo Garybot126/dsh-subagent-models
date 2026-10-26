@@ -223,7 +223,7 @@ window.__ModuleLoader__.load({
             whiteSpace: 'nowrap',
           },
         },
-        overridden ? '本对话已覆盖' : '跟随全局',
+        overridden ? '本对话已覆盖' : '本对话跟随全局',
       )
     }
 
@@ -313,8 +313,7 @@ window.__ModuleLoader__.load({
       const bottom = overlayAnchor ? Math.max(margin, Math.round(viewHeight - overlayAnchor.top + 10)) : 104
 
       const route = scope === 'session' ? sessionRoute : globalRoute
-      const inheritLabel =
-        scope === 'session' ? (globalRoute ? `跟随全局（${routeText(globalRoute)}）` : '跟随主会话') : '跟随主会话'
+      const inheritLabel = scope === 'session' ? '跟随全局' : '跟随主会话'
       const onChange = (next) => save(
         scope === 'session' ? { scope: 'session', sessionId, route: next } : { scope: 'global', route: next },
       )
@@ -368,6 +367,13 @@ window.__ModuleLoader__.load({
           disabled: pending,
           onChange,
         }),
+        scope === 'session'
+          ? h(
+              'div',
+              { style: { fontSize: 11, lineHeight: '16px', color: TOKENS.secondary } },
+              `全局默认：${globalRoute ? routeText(globalRoute) : '未设置'}`,
+            )
+          : null,
         h(
           'div',
           { style: { fontSize: 11, lineHeight: '16px', color: TOKENS.secondary } },

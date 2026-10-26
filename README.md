@@ -13,6 +13,12 @@ controls: 「本对话」 (this conversation's override) and 「全局默认」 
 
 ---
 
+## Screenshots / 截图
+
+| 本对话 | 全局默认 |
+|---|---|
+| ![本对话](docs/screenshots/composer-session.png) | ![全局默认](docs/screenshots/composer-global.png) |
+
 ## Install / 安装
 
 ```bash
