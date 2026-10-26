@@ -2,8 +2,7 @@ url: https://github.com/Garybot126/dsh-subagent-models
 name: Garybot126/dsh-subagent-models
 category: model
 description:
-  en: "Set the provider, model and reasoning effort delegated subagents run with: one profile-wide default in Settings, plus a per-conversation override from a chip beside the composer. Applied on the agent/request hook to every in-process child, without editing agent presets or the subagent tool schema, and effective on the child's next request."
-  zh: 为委派的子代理指定 provider、模型与思考强度：设置页配一个全局默认，输入框旁的「子代理」胶囊按对话覆盖；在 agent/request 钩子上对每个进程内子代理生效，不改 agent preset、不改 subagent 工具 schema，子代理下一次请求即生效。
+  en: "Set the provider, model and reasoning effort delegated subagents run with, from one place: Settings → 子代理. Applied on the agent/request hook to every in-process child, without editing agent presets or the subagent tool schema, effective on the child's next request; the composer shows a read-only badge with the value that will actually be used."
+  zh: 在一个地方（设置 › 子代理）统一指定委派子代理使用的 provider、模型与思考强度；在 agent/request 钩子上对每个进程内子代理生效，不改 agent preset、不改 subagent 工具 schema，子代理下一次请求即生效；输入框旁以只读徽标显示真正会用的值。
 screenshots:
   - https://raw.githubusercontent.com/Garybot126/dsh-subagent-models/main/docs/screenshots/settings.png
-  - https://raw.githubusercontent.com/Garybot126/dsh-subagent-models/main/docs/screenshots/conversation.png
