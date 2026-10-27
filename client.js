@@ -50,6 +50,34 @@ window.__ModuleLoader__.load({
       return state
     }
 
+    /* ── shared route state ─────────────────────────────────────────────── */
+
+    const routeStore = {
+      state: new Map(),
+      listeners: new Set(),
+      get(sessionId) {
+        return routeStore.state.get(sessionId ?? '') ?? null
+      },
+      publish(sessionId, next) {
+        const key = sessionId ?? ''
+        if (routeStore.state.get(key) === next) return
+        routeStore.state.set(key, next)
+        for (const listener of routeStore.listeners) listener(key, next)
+      },
+      applyGlobal(global) {
+        for (const [key, entry] of routeStore.state) {
+          if (!entry || entry.global === global) continue
+          const next = { ...entry, global }
+          routeStore.state.set(key, next)
+          for (const listener of routeStore.listeners) listener(key, next)
+        }
+      },
+      subscribe(listener) {
+        routeStore.listeners.add(listener)
+        return () => routeStore.listeners.delete(listener)
+      },
+    }
+
     /* ── host transport ───────────────────────────────────────────────────── */
 
     function routeKey(route) {
@@ -81,13 +109,36 @@ window.__ModuleLoader__.load({
     }
 
     function useRoute(sessionId) {
-      const [data, setData] = useState(null)
+      const storeKey = sessionId ?? ''
+      const [data, setData] = useState(() => routeStore.get(storeKey))
+      const [dataKey, setDataKey] = useState(storeKey)
       const [error, setError] = useState(null)
       const [pending, setPending] = useState(false)
+      const keyRef = useRef(storeKey)
+      keyRef.current = storeKey
+
+      // The chip and the card each mount their own instance: seed each from the
+      // store and follow it, so a save in one reaches the label in the other.
+      // A conversation switch re-seeds from that key only; a refetch of the same
+      // conversation keeps the visible value until the fresh payload lands.
+      if (dataKey !== storeKey) {
+        setDataKey(storeKey)
+        setData(routeStore.get(storeKey))
+        setError(null)
+      }
+
+      useEffect(
+        () =>
+          routeStore.subscribe((key, next) => {
+            if (key === keyRef.current) setData(next)
+          }),
+        [],
+      )
 
       const reload = useCallback(async () => {
         try {
-          setData(await readState(sessionId))
+          const next = await readState(sessionId)
+          routeStore.publish(sessionId, next)
           setError(null)
         } catch (cause) {
           setError(cause.message ?? String(cause))
@@ -98,10 +149,8 @@ window.__ModuleLoader__.load({
         let alive = true
         readState(sessionId)
           .then((next) => {
-            if (alive) {
-              setData(next)
-              setError(null)
-            }
+            routeStore.publish(sessionId, next)
+            if (alive) setError(null)
           })
           .catch((cause) => {
             if (alive) setError(cause.message ?? String(cause))
@@ -116,7 +165,11 @@ window.__ModuleLoader__.load({
           setPending(true)
           try {
             await writeRoute(payload)
-            setData(await readState(sessionId))
+            const next = await readState(sessionId)
+            routeStore.publish(sessionId, next)
+            // A global write changes the fallback of every cached conversation,
+            // so a later mount cannot seed from a stale default.
+            if (payload?.scope === 'global') routeStore.applyGlobal(next.global)
             setError(null)
           } catch (cause) {
             setError(cause.message ?? String(cause))
@@ -521,7 +574,7 @@ window.__ModuleLoader__.load({
         void fetch(`${ENDPOINT}/hello`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ origin: location.origin, scope: 'client-loaded', rev: 6 }),
+          body: JSON.stringify({ origin: location.origin, scope: 'client-loaded', rev: 7 }),
         }).catch(() => {})
       },
     }
