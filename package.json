@@ -1,9 +1,13 @@
 {
   "name": "dsh-subagent-models",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Set the provider, model and reasoning effort DSH subagents run with: one profile-wide default in Settings, plus a per-conversation override from a chip beside the composer.",
   "type": "module",
   "license": "MIT",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.1-rc.2"
+  },
   "author": "Gary Gai",
   "icon": "icon.svg",
   "repository": {
