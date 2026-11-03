@@ -2,14 +2,17 @@
 
 Set the **provider, model and reasoning effort** that DeepSeek Harness subagents run with — from
 **one entry**, the chip beside the composer. The card it opens has two scopes over the same two
-controls: 「本对话」 (this conversation's override) and 「全局默认」 (the profile default).
+DSH-style pickers: a searchable, provider-grouped model menu and that model's own effort menu.
 
-为 DeepSeek Harness 的子代理统一指定**用哪个模型、思考强度多深**：只有一个入口——输入框旁的「⤳ 子代理」
-胶囊；点开的卡片里用「本对话 / 全局默认」两个范围切换，两处都是同一组「模型 + 思考强度」控件。
+为 DeepSeek Harness 的子代理统一指定**用哪个模型、思考强度多深**：只有一个入口——输入框旁的「子代理」
+胶囊；点开的卡片里用「本对话 / 全局默认」两个范围切换，两处都是同一组 DSH 风格的「模型 + 思考强度」
+浮层菜单（可搜索、按提供方分组、行内勾选）。
 
 - Host half: route store + `agent/request` override (`index.js`)
 - Web half: the composer chip + a frame-wide card (`client.js`)
-- No runtime dependency on dsh packages; no build step; no settings page.
+- No build step and no settings page. The Web half uses the host's
+  `@deepseek-ai/dsh-client-ui-primitives` when present (a frozen platform module — nothing to
+  install), with hand-drawn `.dsm-*` fallbacks on hosts that do not ship it.
 
 ---
 
@@ -35,15 +38,20 @@ Then restart dsh once if the plugin row was not hot-loaded.
 
 | Where | What |
 |---|---|
-| Composer → 「⤳ 子代理 …」 chip | **The only entry.** Opens the card |
-| Card → 「本对话」 tab | This conversation's override; the model list's first row is 「跟随全局」 |
-| Card → 「全局默认」 tab | The profile-wide default for every conversation without an override |
+| Composer → 「子代理 …」 chip | **The only entry.** Opens the card |
+| Card → 「本对话」 scope | This conversation's override; the model menu's first row is 「跟随全局」 |
+| Card → 「全局默认」 scope | The profile-wide default for every conversation without an override |
 
 The chip's label is the **effective** route for the conversation (e.g. `子代理 DeepSeek-V4.1-Flash ·
 high`), so the composer always says what a delegation will actually use. The card's footer repeats
 it with its source: `下一次委派将使用 …（来源：本对话 / 全局默认）`.
 
-Both pickers are driven by the live LLM catalog (`ctx.llm`): models are grouped by provider, and the
+The card's two rows are DSH-style cells — click one to open a menu anchored above it. The model
+menu matches the built-in composer model picker: a search box for catalogs above four models,
+provider groups with sticky headings, rounded hover rows and an inline check mark on the current
+choice. The effort menu lists 「模型默认」 plus only the levels that model advertises.
+
+Both menus are driven by the live LLM catalog (`ctx.llm`): models are grouped by provider, and the
 effort list is the one **that model** advertises (`resolveModelInfo().reasoning.efforts`), so an
 unsupported level is never offered.
 
@@ -120,8 +128,8 @@ credentials, or any other file.
 Several plugins in the market move subagent routing: `dsh-subagent-custom` (task-class routing),
 `dsh-subagent-model-picker` (a per-session picker), `dsh-subagent-default-model` (settings.yaml
 default), `dsh-model-settings` (a settings panel), `dsh-orquestrator` (a fixed forced route). This
-one keeps the surface at one composer chip: two scopes, one pair of controls, and a label that
-always shows the effective value.
+one keeps the surface at one composer chip: two scopes, one pair of DSH-style pickers, and a label
+that always shows the effective value.
 
 ## Verified / 已验证
 
