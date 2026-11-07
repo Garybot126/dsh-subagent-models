@@ -12,8 +12,8 @@
  * components are used; otherwise the `.dsm-*` fallbacks below render the same
  * structure.
  *
- * The route is applied by the Host `agent/request` override; this module only
- * reads and writes /plugin/subagent-models/*.
+ * The route is applied by the Host when the child is created (`agent/created`); this
+ * module only reads and writes /plugin/subagent-models/*.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-subagent-models',

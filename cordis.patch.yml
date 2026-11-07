@@ -1,11 +1,11 @@
 # Rows owned by this bundle.
 #
 # One Host row: the route store, the HTTP face the Web UI talks to, and the
-# `agent/request` override that applies a route to delegated children.
+# `agent/created` selection that applies a route to delegated children.
 #
 # No shipped row is patched. The subagent tool lives in the AGENT-PLANE preset
 # composition, so rewriting it from a Profile patch has no effect on it; the
-# route is applied one level lower instead.
+# route is applied to the child itself instead.
 - insert:
     - id: subagent-models
       name: dsh-subagent-models

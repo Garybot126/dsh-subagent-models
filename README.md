@@ -8,7 +8,7 @@ DSH-style pickers: a searchable, provider-grouped model menu and that model's ow
 胶囊；点开的卡片里用「本对话 / 全局默认」两个范围切换，两处都是同一组 DSH 风格的「模型 + 思考强度」
 浮层菜单（可搜索、按提供方分组、行内勾选）。
 
-- Host half: route store + `agent/request` override (`index.js`)
+- Host half: route store + `agent/created` selection (`index.js`)
 - Web half: the composer chip + a frame-wide card (`client.js`)
 - No build step and no settings page. The Web half uses the host's
   `@deepseek-ai/dsh-client-ui-primitives` when present (a frozen platform module — nothing to
@@ -67,7 +67,8 @@ unsupported level is never offered.
 ## When it takes effect / 什么时候生效
 
 - Applies to the **next delegation** — no restart, no new conversation.
-- A child that is already running picks it up on its **next model request**.
+- A child that is already running keeps the route it was created with: the selection is written
+  once, at creation, so a changed route affects the next delegation, not a running child.
 - With no route configured, children keep inheriting the parent session's route — exactly the
   behaviour of not installing the plugin.
 
@@ -75,18 +76,29 @@ unsupported level is never offered.
 
 The delegation tool (`subagent`) is composed in the **agent-plane preset**, not in the Profile
 patch, and it carries its own static `agentOptions`. A plugin cannot rewrite that composition, so
-the route is applied one level lower:
+the route is applied to the delegated child itself:
 
 ```
-agent/request  (waterfall: "replace the frozen call configuration")
+agent/created  →  agent.model.select({ provider, model, reasoningEffort })
 ```
 
-The listener is registered once and only rewrites an Agent that another live Agent owns — a
-delegated child. A top-level Session is never touched. Consequences:
+DSH ≥ 0.2.2 fixes a step's model selection **before** the `agent/request` waterfall runs and now
+rejects any proposal that changes provider, model or reasoning effort (the error it throws says
+“… after step preparation fixed …; use `agent.model.select()` before step preparation”), so that
+seam is no longer usable for routing. `agent.model.select()` appends a `model/selection` event —
+the projection a step reads its selection from — and `agent/created` is emitted (and awaited,
+it is a serial event) after the child is constructed but before its first step prepares. The
+listener is registered once and only touches a Session whose `origin` is `subagent`; a top-level
+Session is never touched, and the conversation root for the per-conversation scope is found by
+walking `parentSession` up until a non-subagent Session is reached. Consequences:
 
 - works with the official `subagent` tool, without editing the preset and without adding
   model-selection parameters to the tool schema;
-- `subagent`, `subagent_fork` and Agent Teams members all count as delegated agents.
+- `subagent`, `subagent_fork` and Agent Teams members all count as delegated agents (every
+  in-process child is created with `origin: "subagent"`);
+- a route whose provider/model is no longer advertised by a mounted provider is skipped with a
+  `[subagent-models]` warning — a stale route degrades to "no routing" instead of breaking the
+  child.
 
 ## Data / 数据
 
@@ -118,10 +130,12 @@ credentials, or any other file.
 - `subagent_fork` children are overridden too. A fork shares the parent's prefix, so a different
   model costs its KV cache; clear the route (or keep the preset's own `agentOptions`) if that
   matters to you.
-- An effort the chosen model does not support fails the adapter's validation — the plugin never
-  silently downgrades.
-- The override is per request. Context-window and metering metadata follow the effective route,
-  while the child's creation options keep the preset's values.
+- An effort the chosen model does not support is rejected by the adapter's validation on the
+  child's first request — the plugin never silently downgrades an effort it was told to use.
+- The route is chosen once per child, at creation, and wins over the composition's `agentOptions`
+  because the recorded selection is read before that fallback; context-window and metering
+  metadata follow the selected route for the child's whole lifetime. Changing the route does not
+  re-route a child that is already running.
 
 ## Relationship to similar plugins / 与同类插件的关系
 
@@ -131,13 +145,20 @@ default), `dsh-model-settings` (a settings panel), `dsh-orquestrator` (a fixed f
 one keeps the surface at one composer chip: two scopes, one pair of DSH-style pickers, and a label
 that always shows the effective value.
 
+Since dsh 0.2.2 the host also ships its own subagent model-selection policy (an allowlist plus
+per-call `provider` / `model` parameters on the tool). That one *permits* a selection; this plugin
+*forces* one when the child is created.
+
 ## Verified / 已验证
 
-On dsh 0.2.1-rc.2 (desktop profile):
+On dsh 0.2.2-rc.1 (desktop profile):
 
-- global route set to an invalid model → the child failed; `deepseek-v4-pro` + `max` → it succeeded;
-- **per-conversation** override set to an invalid model → the child failed (the session scope is
-  honored), then clearing it restored the global route;
+- global route `opencode-go` / `deepseek-v4.1-flash` / `max` → a delegated child's
+  `model/selection` and its first `request/header` both carried that route, and the child
+  completed its turn;
+- with the route cleared, the child inherited the parent session's route;
+- a route naming an unregistered provider/model is skipped with a `[subagent-models]` warning
+  instead of being forced (handler-level harness; not exercised end-to-end);
 - `GET /plugin/subagent-models/state?sessionId=…` → 200 with `global`, `session` and the catalog;
 - `POST /plugin/subagent-models/route` with `scope: "session"` / `"global"` → 200 and the JSON file
   updates on disk;

@@ -2,23 +2,33 @@
  * Subagent routing: choose the provider/model/reasoning effort delegated
  * children run with — per profile (global) or per conversation.
  *
- * WHY `agent/request` AND NOT A PROVIDER OR THE TOOL ROW
- * -----------------------------------------------------
+ * WHY `agent/created` AND `agent.model.select()`
+ * ----------------------------------------------
  * The delegation tool (`subagent`) is composed in the AGENT-PLANE preset
  * (`~/.dsh/.agent-presets/<name>/agent.cordis.yml`), not in the Host profile
  * patch, and it already carries a static `agentOptions` pin. A plugin can
  * neither edit that composition nor affect it from the profile layer, so the
- * route is applied one level lower: `agent/request` is the documented waterfall
- * for "replace the frozen call configuration" of one agent, and it runs for a
- * child on every admitted request.
+ * route is applied on the Host side, to the delegated child itself.
  *
- * The listener is registered once, globally, and ignores top-level Sessions:
- * only an Agent that some other live Agent owns (a delegated child) is
- * rewritten. Route precedence for the child of conversation S (preset P):
+ * An earlier version rewrote the result of the `agent/request` waterfall. That
+ * seam is contract-frozen since DSH 0.2.2: the step's `selection` is computed
+ * before the waterfall runs, and `prepareRequest` then throws when the proposed
+ * config names a different provider/model/reasoningEffort than the selection
+ * fixed for that step ("... after step preparation fixed ...; use
+ * agent.model.select() before step preparation"). Every delegated child died
+ * before its first turn under that override.
  *
- *   S.presets[P] -> S.default -> global.presets[P] -> global.default -> none
+ * The supported seam sits one level up: a step reads its selection from the
+ * Session's `model/selection` projection, and `agent.model.select()` appends
+ * that event. `agent/created` is emitted — and awaited, it is a serial event —
+ * after the child is constructed but before its first step prepares, so
+ * selecting the route there fixes the child for every request. Only delegated
+ * children are touched; a top-level Session keeps the user's choice.
  *
- * `none` leaves the child with whatever its composition created it with.
+ * Route precedence for the child of conversation S: S.default -> global.default
+ * -> none. `none`, or a route whose provider/model is no longer advertised by a
+ * mounted provider, leaves the child with whatever its composition created it
+ * with. Preset-scoped entries stay in the state file but are not applied.
  */
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -80,16 +90,6 @@ function normalizeState(input) {
 function resolveRoute(state, sessionId) {
   const session = sessionId ? state.sessions[sessionId] : undefined
   return session?.default || state.global.default || null
-}
-
-/** A route wins only when its model is still advertised by a mounted provider. */
-function routeApplies(route) {
-  const base = {
-    provider: route.provider,
-    model: route.model,
-    ...(route.effort ? { reasoningEffort: route.effort } : {}),
-  }
-  return base
 }
 
 export function apply(ctx) {
@@ -201,58 +201,71 @@ export function apply(ctx) {
   }
 
   /**
-   * Live owners of a delegated child, conversation roots first. A child of a
-   * child is owned by both its delegating parent and (transitively) the
-   * conversation root; the root decides which conversation this is, so it is
-   * asked first and a deeper owner only answers when the root has no route.
+   * The conversation a delegated child belongs to. A parent can itself be a
+   * subagent (delegation nests), so walk `parentSession` up until a session
+   * with `origin !== 'subagent'` is reached; that session's override is the
+   * one that applies. Bounded and cycle-safe; when the sessions service cannot
+   * answer, the last id reached is the best available guess.
    */
-  function ownersOf(agent) {
-    const agents = ctx.get('agents')
-    if (!agents) return []
-    let roots = []
-    let live = []
-    try {
-      roots = agents.roots()
-      live = agents.list()
-    } catch {
-      return []
-    }
-    const rootIds = new Set(roots.map((root) => root.id))
-    const ordered = [...roots, ...live.filter((entry) => !rootIds.has(entry.id))]
-    const owners = []
-    for (const other of ordered) {
-      if (!other || other.id === agent.id) continue
+  function conversationRoot(startId) {
+    let current = startId
+    const seen = new Set()
+    for (let depth = 0; depth < 16; depth += 1) {
+      if (!current || seen.has(current)) break
+      seen.add(current)
+      let session
       try {
-        if (agents.isOwnedBy(agent.id, other)) owners.push(other)
+        session = ctx.get('sessions')?.get?.(current)
       } catch {
-        /* an agent leaving the registry is not an owner */
+        return current
       }
+      if (!session || session.header?.origin !== 'subagent') return current
+      current = session.header.parentSession
     }
-    return owners
+    return current || startId
   }
 
-  async function routeFor(agent) {
-    if (!agent?.id) return null
-    // Only a delegated child is rewritten; a top-level Session keeps the user's choice.
-    const owners = ownersOf(agent)
-    if (owners.length === 0) return null
-    const state = await loadState()
-    for (const owner of owners) {
-      const session = state.sessions[owner.id]
-      if (session?.default) return session.default
-    }
-    return state.global.default || null
-  }
-
-  ctx.on('agent/request', async (payload, next) => {
-    const config = await next()
+  /** A route wins only while its provider and model are still advertised. */
+  async function isAdvertised(route) {
+    const llm = ctx.get('llm')
+    if (!llm) return false
+    let providers = []
     try {
-      const route = await routeFor(payload?.agent)
-      if (!route) return config
-      const overridden = routeApplies(route)
-      return { ...config, ...overridden, ...(route.effort ? { reasoningEffort: route.effort } : { reasoningEffort: undefined }) }
+      providers = llm.listProviders()
     } catch {
-      return config
+      providers = []
+    }
+    if (!providers.some((provider) => provider?.id === route.provider)) return false
+    const models = await llm.listModels(route.provider)
+    return models.some((model) => model?.id === route.model)
+  }
+
+  /**
+   * Route a delegated child before its first step. `agent/created` is emitted
+   * (and awaited, it is serial) after the child is constructed and before the
+   * step reads its selection, so `agent.model.select()` here is the supported
+   * way to fix the child's route. Top-level Sessions are never touched, and no
+   * failure escapes into agent creation: a stale route degrades to no routing.
+   */
+  ctx.on('agent/created', async ({ agent }) => {
+    try {
+      const header = agent?.session?.header
+      if (header?.origin !== 'subagent' || !header.parentSession) return
+      const state = await loadState()
+      const route = resolveRoute(state, conversationRoot(header.parentSession))
+      if (!route) return
+      if (!(await isAdvertised(route))) {
+        ctx.logger?.warn?.(`[subagent-models] route ${route.provider}/${route.model} is not advertised by any mounted provider; delegating without an override`)
+        return
+      }
+      if (typeof agent.model?.select !== 'function') return
+      agent.model.select({
+        provider: route.provider,
+        model: route.model,
+        ...(route.effort ? { reasoningEffort: route.effort } : {}),
+      })
+    } catch (error) {
+      ctx.logger?.warn?.(`[subagent-models] could not route a subagent; delegating without an override: ${error?.message ?? error}`)
     }
   })
 
