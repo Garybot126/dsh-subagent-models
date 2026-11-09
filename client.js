@@ -122,10 +122,12 @@ html[data-platform=darwin] .dsm-groupHeading{border-radius:0}
 .dsm-chip{border-radius:var(--dsw-radius-sm);min-width:0;max-width:220px;height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:transparent;border:none;outline:none;align-items:center;gap:4px;padding:0 4px 0 8px;font-size:13px;font-weight:400;line-height:20px;display:inline-flex;font-family:inherit}
 .dsm-chip:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsm-chip:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
-.dsm-chipLabel{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}
+.dsm-chipLabel{display:var(--dsh-composer-model-text-display,block);text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}
 .dsm-chipIcon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px}
 .dsm-chipChevron{color:var(--dsw-alias-label-caption);flex:none;transition:transform .12s}
 .dsm-chipChevronOpen{transform:rotate(180deg)}
+[data-model-compact] .dsm-chipLabel{display:none}
+[data-model-compact] .dsm-chip{max-width:none}
 .dsm-iconFallback{display:inline-flex;align-items:center;justify-content:center;line-height:1;font-style:normal;font-family:inherit}
 .dsm-stateDot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-business-primary);animation:dsm-pulse 1.2s ease-in-out infinite}
 @keyframes dsm-pulse{0%,100%{opacity:1}50%{opacity:.35}}
@@ -1276,6 +1278,7 @@ html[data-platform=darwin] .dsm-groupHeading{border-radius:0}
           title: effective
             ? `子代理将使用 ${effective.provider}/${effective.model}${effective.effort ? `（${effective.effort}）` : ''}${sessionRoute ? '，来源：本对话' : '，来源：全局默认'}`
             : '未配置子代理模型，跟随主会话',
+          'aria-label': label,
           'aria-haspopup': 'dialog',
           'aria-expanded': isOpen,
           style: { color: sessionRoute ? TOKENS.brand : TOKENS.secondary },
